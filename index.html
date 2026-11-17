@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2f6f3e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="뭐먹지">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="description" content="날씨·동행·예산에 맞춰 오늘 저녁 메뉴를 골라 주는 앱">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<title>오늘 저녁 뭐 먹지</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* Layout: 한 손으로 쓰는 단일 컬럼 앱. 결과 카드가 맨 위, 조건·투표·관리가 아래로 이어짐 */
+  :root {
+    --bg: #f3f4ef;
+    --surface: #ffffff;
+    --surface-2: #e9ece4;
+    --text: #1c211c;
+    --muted: #677064;
+    --border: #dde2d7;
+    --accent: #2f6f3e;          /* 바질 그린 */
+    --accent-ink: #ffffff;
+    --accent-soft: #dcebdf;
+    --mustard-soft: #fbefc9;    /* 추천 이유 하이라이트 */
+    --mustard-ink: #7a5600;
+    --shadow: 0 8px 28px rgba(28, 40, 28, .08);
+    --font-display: "Black Han Sans", "Noto Sans KR", system-ui, sans-serif;
+    --font-body: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141813; --surface: #1c211b; --surface-2: #262c25; --text: #eef1ea;
+      --muted: #9aa597; --border: #323a30; --accent: #7cc48e; --accent-ink: #10170f;
+      --accent-soft: #213826; --mustard-soft: #3a2f12; --mustard-ink: #f1c75a;
+      --shadow: 0 8px 28px rgba(0, 0, 0, .35); color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141813; --surface: #1c211b; --surface-2: #262c25; --text: #eef1ea;
+    --muted: #9aa597; --border: #323a30; --accent: #7cc48e; --accent-ink: #10170f;
+    --accent-soft: #213826; --mustard-soft: #3a2f12; --mustard-ink: #f1c75a;
+    --shadow: 0 8px 28px rgba(0, 0, 0, .35); color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font-body);
+    line-height: 1.5; font-size: 15px; -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    max-width: 560px; margin: 0 auto;
+    padding-block: 20px 72px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  header h1 { font-family: var(--font-display); font-weight: 400; font-size: 30px; margin: 0; letter-spacing: -.5px; text-wrap: balance; }
+  header h1 span { color: var(--accent); }
+  header p { color: var(--muted); font-size: 14px; margin: 2px 0 0; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 18px; }
+  .card h2 { font-size: 16px; margin: 0 0 4px; font-weight: 700; }
+  .card .hint { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+
+  /* 결과 */
+  .result { text-align: center; padding: 26px 18px 18px; box-shadow: var(--shadow); }
+  .emoji { font-size: 76px; line-height: 1; height: 84px; }
+  .name { font-family: var(--font-display); font-size: 36px; margin: 10px 0 4px; min-height: 50px; word-break: keep-all; }
+  .reason { min-height: 24px; font-size: 14px; color: var(--mustard-ink); font-weight: 700; }
+  .tags { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; min-height: 26px; margin-top: 6px; }
+  .tag { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+  .tag.hot { background: var(--mustard-soft); color: var(--mustard-ink); font-weight: 700; }
+  .rolling .name, .rolling .emoji { opacity: .5; }
+  .pop { animation: pop .35s ease; }
+  @keyframes pop { 0% { transform: scale(.85); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .pop { animation: none; } }
+
+  .btn { border: 0; border-radius: 14px; padding: 13px 16px; font: inherit; font-weight: 700; cursor: pointer; transition: transform .1s ease, opacity .2s; }
+  .btn:active { transform: scale(.97); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn:focus-visible, .chip:focus-visible, .tab:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn-main { width: 100%; background: var(--accent); color: var(--accent-ink); font-size: 18px; padding: 16px; margin-top: 16px; }
+  .actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
+  .actions .btn { background: var(--surface-2); color: var(--text); font-size: 14px; padding: 11px 6px; }
+  .links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+  .links a { text-align: center; font-size: 13px; color: var(--muted); text-decoration: none; padding: 9px; border: 1px dashed var(--border); border-radius: 12px; }
+  .links a:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* 조건 */
+  details.filters > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; }
+  details.filters > summary::-webkit-details-marker { display: none; }
+  details.filters > summary h2 { margin: 0; }
+  .summary-line { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .chev { color: var(--muted); transition: transform .2s; }
+  details[open] .chev { transform: rotate(180deg); }
+  .groups { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+  .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 500; letter-spacing: .3px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; }
+  .chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+  .toggle input { accent-color: var(--accent); width: 18px; height: 18px; }
+  .count { font-size: 13px; color: var(--muted); }
+  .row-label { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .presets { display: flex; gap: 2px; }
+  .mini { border: 0; background: none; color: var(--accent); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; padding: 2px 6px; border-radius: 6px; }
+  .mini:hover { background: var(--accent-soft); }
+
+  /* 투표 */
+  .poll-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .poll-item { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; position: relative; overflow: hidden; }
+  .poll-item.lead { border-color: var(--accent); }
+  .poll-bar { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); z-index: 0; transition: width .3s; }
+  .poll-item > *:not(.poll-bar) { position: relative; z-index: 1; min-width: 0; }
+  .poll-name { font-weight: 700; }
+  .poll-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); grid-column: 1; }
+  .avatars { display: flex; }
+  .avatars img { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--surface); margin-left: -5px; }
+  .avatars img:first-child { margin-left: 0; }
+  .vote-btn { grid-row: 1 / span 2; grid-column: 2; background: var(--surface); color: var(--accent); border: 1px solid var(--accent); padding: 8px 14px; font-size: 14px; }
+  .vote-btn.mine { background: var(--accent); color: var(--accent-ink); }
+  .poll-foot { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .poll-foot .btn { flex: 1; font-size: 14px; padding: 10px; background: var(--surface-2); color: var(--text); }
+  .note { font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 12px; padding: 10px 12px; }
+
+  /* 기록 / 즐겨찾기 / 관리 */
+  .tabs { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: 12px; margin-bottom: 10px; }
+  .tab { flex: 1; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; padding: 8px 4px; border-radius: 9px; cursor: pointer; }
+  .tab.on { background: var(--surface); color: var(--text); font-weight: 700; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; align-items: center; gap: 8px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
+  ul.list li:last-child { border-bottom: 0; }
+  ul.list .when { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .x { margin-left: auto; border: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 8px; }
+  .x:hover { color: var(--accent); }
+  .empty { color: var(--muted); font-size: 14px; justify-content: center; text-align: center; }
+  .sub-h { font-size: 13px; font-weight: 700; margin: 14px 0 4px; color: var(--muted); }
+  .add { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .add input { grid-column: 1 / -1; }
+  .add input, .add select { font: inherit; font-size: 14px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text); min-width: 0; }
+  .add .btn { grid-column: 1 / -1; padding: 10px; background: var(--accent); color: var(--accent-ink); font-size: 14px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%) translateY(16px); max-width: calc(100% - 32px);
+    background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 999px;
+    font-size: 14px; opacity: 0; transition: .25s; pointer-events: none; text-align: center; z-index: 20;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>오늘 저녁 <span>뭐 먹지?</span></h1>
+    <p>날씨, 같이 먹는 사람, 예산까지 따져서 골라 드려요</p>
+  </header>
+
+  <!-- 결과 -->
+  <section class="card result" id="resultCard" aria-live="polite">
+    <div class="emoji" id="rEmoji">🍽️</div>
+    <div class="name" id="rName">무엇을 먹을까요?</div>
+    <div class="reason" id="rReason"></div>
+    <div class="tags" id="rTags"></div>
+    <button class="btn btn-main" id="pickBtn">🎲 메뉴 추천받기</button>
+    <div id="afterPick" hidden>
+      <div class="actions">
+        <button class="btn" id="acceptBtn">✅ 이걸로 결정</button>
+        <button class="btn" id="pollAddBtn">📮 투표에 올리기</button>
+        <button class="btn" id="favBtn">♡ 즐겨찾기</button>
+        <button class="btn" id="hideBtn">🚫 이 메뉴 빼기</button>
+      </div>
+      <div class="links">
+        <a id="mapLink" target="_blank" rel="noopener">📍 근처 맛집 찾기</a>
+        <a id="recipeLink" target="_blank" rel="noopener">👩‍🍳 레시피 보기</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- 조건 -->
+  <section class="card">
+    <details class="filters" id="filtersBox" open>
+      <summary>
+        <div>
+          <h2>오늘의 조건</h2>
+          <div class="summary-line" id="summaryLine"></div>
+        </div>
+        <span class="chev" aria-hidden="true">▾</span>
+      </summary>
+      <div class="groups">
+        <div>
+          <div class="label">날씨 · 계절 <span id="seasonNote"></span></div>
+          <div class="chips" data-key="weather">
+            <button class="chip on" data-v="auto">자동</button>
+            <button class="chip" data-v="none">신경 안 씀</button>
+            <button class="chip" data-v="r">☔ 비 와요</button>
+            <button class="chip" data-v="c">🧣 추워요</button>
+            <button class="chip" data-v="h">☀️ 더워요</button>
+          </div>
+        </div>
+        <div>
+          <div class="label">누구랑 먹나요</div>
+          <div class="chips" data-key="company">
+            <button class="chip on" data-v="any">상관없음</button>
+            <button class="chip" data-v="s">🙋 혼밥</button>
+            <button class="chip" data-v="d">💑 둘이서·데이트</button>
+            <button class="chip" data-v="g">👨‍👩‍👧 가족·여럿이</button>
+          </div>
+        </div>
+        <div>
+          <div class="label">1인 예산 (여러 개 선택 · 외식 기준 대략)</div>
+          <div class="chips" id="budgetChips"></div>
+        </div>
+        <div>
+          <div class="label row-label">
+            <span>종류 (여러 개 선택)</span>
+            <span class="presets">
+              <button class="mini" data-preset="all">전체</button>
+              <button class="mini" data-preset="meal">식사만</button>
+              <button class="mini" data-preset="sweet">디저트·카페만</button>
+            </span>
+          </div>
+          <div class="chips" id="catChips"></div>
+        </div>
+        <div>
+          <div class="label">맵기</div>
+          <div class="chips" data-key="spicy">
+            <button class="chip on" data-v="any">상관없음</button>
+            <button class="chip" data-v="mild">안 매운 것</button>
+            <button class="chip" data-v="hot">매운 거 🌶️</button>
+          </div>
+        </div>
+        <div>
+          <div class="label">배고픔</div>
+          <div class="chips" data-key="weight">
+            <button class="chip on" data-v="any">상관없음</button>
+            <button class="chip" data-v="light">가볍게</button>
+            <button class="chip" data-v="heavy">든든하게</button>
+          </div>
+        </div>
+        <div>
+          <div class="label">어떻게 먹을까</div>
+          <div class="chips" data-key="way">
+            <button class="chip on" data-v="any">상관없음</button>
+            <button class="chip" data-v="집">🏠 집밥</button>
+            <button class="chip" data-v="배달">🛵 배달</button>
+            <button class="chip" data-v="외식">🚶 외식</button>
+          </div>
+        </div>
+        <div>
+          <label class="toggle"><input type="checkbox" id="excludeRecent" checked> 최근 3일 안에 먹은 메뉴 빼기</label>
+          <label class="toggle" style="margin-top:6px"><input type="checkbox" id="favOnly"> 즐겨찾기에서만 고르기</label>
+        </div>
+        <div class="count" id="count"></div>
+      </div>
+    </details>
+  </section>
+
+  <!-- 같이 투표 -->
+  <section class="card" id="pollCard">
+    <h2>🗳️ 같이 투표</h2>
+    <p class="hint">후보를 올리고 링크를 공유하면 함께 고를 수 있어요. 결과는 실시간으로 바뀌어요.</p>
+    <div id="pollBody"><div class="note">투표 정보를 불러오는 중…</div></div>
+  </section>
+
+  <!-- 기록 / 즐겨찾기 / 메뉴 관리 -->
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="history">최근 기록</button>
+      <button class="tab" data-tab="fav">즐겨찾기</button>
+      <button class="tab" data-tab="manage">메뉴 관리</button>
+    </div>
+    <div id="pane-history"><ul class="list" id="historyList"></ul></div>
+    <div id="pane-fav" hidden><ul class="list" id="favList"></ul></div>
+    <div id="pane-manage" hidden>
+      <form class="add" id="addForm">
+        <input id="addName" placeholder="내 메뉴 이름 (예: 엄마표 김치전)" maxlength="20" required>
+        <select id="addCat" aria-label="종류"></select>
+        <select id="addSpicy" aria-label="맵기">
+          <option value="0">안 매움</option>
+          <option value="1">약간 매콤</option>
+          <option value="2">매움</option>
+        </select>
+        <input id="addPrice" type="number" inputmode="numeric" min="0" step="500" placeholder="1인 가격 (원, 선택)">
+        <button class="btn" type="submit">＋ 메뉴 추가</button>
+      </form>
+      <div class="sub-h">내가 추가한 메뉴</div>
+      <ul class="list" id="customList"></ul>
+      <div class="sub-h">추천에서 뺀 메뉴</div>
+      <ul class="list" id="hiddenList"></ul>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+// ---------- 메뉴 데이터 ----------
+// M(이름, 이모지, 종류, 맵기 0~2, 든든함 0/1, 먹는 방식, 1인 대략 가격(천 원), 태그)
+// 태그: r 비 오는 날, c 추운 날, h 더운 날, s 혼밥, d 둘이서·데이트, g 여럿이
+const CATS = [
+  { id: "korean", label: "🍚 한식" }, { id: "chinese", label: "🥟 중식" },
+  { id: "japanese", label: "🍣 일식" }, { id: "western", label: "🍝 양식" },
+  { id: "snack", label: "🍢 분식" }, { id: "asian", label: "🌏 아시안" },
+  { id: "chicken", label: "🍗 치킨" }, { id: "late", label: "🌙 야식" },
+  { id: "fastfood", label: "🍔 패스트푸드" }, { id: "dessert", label: "🍰 디저트" },
+  { id: "cafe", label: "☕ 카페·브런치" },
+];
+const SWEET_CATS = ["dessert", "cafe"];          // 처음엔 꺼 둠 (식사 위주 추천)
+const NEW_CATS = ["late", "fastfood", "dessert", "cafe"];
+// 1인 예산 구간 (천 원 단위, min 초과 ~ max 이하)
+const BUDGETS = [
+  { id: "b1", label: "~5천 원", min: 0, max: 5 },
+  { id: "b2", label: "5천~1만", min: 5, max: 10 },
+  { id: "b3", label: "1만~1.5만", min: 10, max: 15 },
+  { id: "b4", label: "1.5만~2만", min: 15, max: 20 },
+  { id: "b5", label: "2만~3만", min: 20, max: 30 },
+  { id: "b6", label: "3만~5만", min: 30, max: 50 },
+  { id: "b7", label: "5만 원 이상", min: 50, max: Infinity },
+];
+const TAG = { r: "☔ 비 오는 날", c: "🧣 추운 날", h: "☀️ 더운 날", s: "혼밥 OK", d: "데이트", g: "여럿이" };
+const REASON = {
+  r: n => `비 오는 날엔 ${n}`, c: n => `추운 날 몸 녹이기엔 ${n}`, h: n => `더위엔 시원하게 ${n}`,
+  s: () => "혼자서도 부담 없는 메뉴", d: () => "둘이 먹기 좋은 메뉴", g: () => "여럿이 나눠 먹기 좋은 메뉴",
+};
+const M = (n, e, c, s, h, w, p, t) => ({ n, e, c, s, h, w: w.split(","), p, t });
+const BASE_MENUS = [
+  // 한식
+  M("김치찌개","🍲","korean",1,1,"집,외식",9,"cs"), M("된장찌개","🥘","korean",0,1,"집,외식",8.5,"cs"),
+  M("제육볶음","🐷","korean",2,1,"집,외식,배달",10,"s"), M("불고기","🥩","korean",0,1,"집,외식",14,"g"),
+  M("삼겹살","🥓","korean",0,1,"외식,집",19,"g"), M("비빔밥","🥗","korean",1,0,"집,외식",9.5,"sh"),
+  M("부대찌개","🍲","korean",1,1,"외식,집,배달",12,"gcr"), M("순두부찌개","🌶️","korean",2,1,"외식,집",9.5,"cs"),
+  M("감자탕","🍖","korean",1,1,"외식,배달",13,"gc"), M("닭갈비","🍗","korean",2,1,"외식",15,"gd"),
+  M("갈비탕","🍖","korean",0,1,"외식",16,"cs"), M("삼계탕","🐔","korean",0,1,"외식",18,"h"),
+  M("보쌈","🥬","korean",0,1,"배달,외식",16,"g"), M("족발","🍖","korean",0,1,"배달,외식",17,"g"),
+  M("물냉면","🍜","korean",0,0,"외식",12,"hs"), M("비빔냉면","🌶️","korean",2,0,"외식",12.5,"h"),
+  M("칼국수","🍜","korean",0,0,"외식,집",9,"rc"), M("수제비","🥣","korean",0,0,"외식,집",8.5,"r"),
+  M("김치볶음밥","🍳","korean",1,0,"집",4,"s"), M("닭볶음탕","🍲","korean",2,1,"집,외식",13,"gr"),
+  M("육개장","🌶️","korean",2,1,"외식",11,"cs"), M("곱창","🔥","korean",1,1,"외식,배달",23,"g"),
+  M("콩나물국밥","🥣","korean",0,0,"외식",7.5,"cs"), M("돼지국밥","🥣","korean",0,1,"외식",10,"cs"),
+  M("순대국","🥣","korean",0,1,"외식",9.5,"cs"), M("뼈해장국","🍖","korean",1,1,"외식",10,"cs"),
+  M("해물파전","🥞","korean",0,0,"외식,집",15,"rg"), M("김치전","🥞","korean",1,0,"집",3,"r"),
+  M("갈비찜","🍖","korean",0,1,"집,외식",28,"g"), M("쭈꾸미볶음","🐙","korean",2,1,"외식",14,"gd"),
+  M("낙지볶음","🐙","korean",2,1,"외식",15,"s"), M("아귀찜","🐟","korean",2,1,"외식,배달",22,"g"),
+  M("해물탕","🦀","korean",1,1,"외식",25,"gcr"), M("콩국수","🥛","korean",0,0,"외식,집",11,"hs"),
+  M("막국수","🍜","korean",0,0,"외식",10,"h"), M("소고기구이","🥩","korean",0,1,"외식",45,"gd"),
+  M("한정식","🍱","korean",0,1,"외식",35,"gd"), M("백반","🍚","korean",0,1,"외식",8,"s"),
+  M("생선구이","🐟","korean",0,1,"외식,집",12,"s"),
+  // 중식
+  M("짜장면","🍝","chinese",0,1,"배달,외식",7,"s"), M("짬뽕","🌶️","chinese",2,1,"배달,외식",9,"rcs"),
+  M("탕수육","🍤","chinese",0,1,"배달,외식",12,"g"), M("마라탕","🌶️","chinese",2,1,"외식,배달",13,"sc"),
+  M("마라샹궈","🔥","chinese",2,1,"외식,배달",22,"gd"), M("마파두부","🍛","chinese",1,1,"집,외식",9.5,"s"),
+  M("볶음밥","🍳","chinese",0,0,"배달,외식,집",8,"s"), M("양꼬치","🍢","chinese",1,1,"외식",22,"g"),
+  M("깐풍기","🍗","chinese",1,1,"배달,외식",15,"g"), M("훠궈","🍲","chinese",2,1,"외식",28,"gcd"),
+  M("딤섬","🥟","chinese",0,0,"외식",20,"d"), M("북경오리","🦆","chinese",0,1,"외식",55,"gd"),
+  // 일식
+  M("초밥","🍣","japanese",0,0,"외식,배달",20,"dh"), M("오마카세","🍣","japanese",0,1,"외식",80,"d"),
+  M("라멘","🍜","japanese",0,1,"외식",11,"csr"), M("돈카츠","🍱","japanese",0,1,"외식,배달",12,"s"),
+  M("우동","🍜","japanese",0,0,"외식,집",8,"rs"), M("규동","🍚","japanese",0,1,"외식,집",9,"s"),
+  M("사케동","🐟","japanese",0,0,"외식",15,"sd"), M("텐동","🍤","japanese",0,1,"외식",13,"s"),
+  M("모둠회","🐟","japanese",0,0,"외식,배달",32,"gdh"), M("오코노미야키","🥞","japanese",0,1,"외식",15,"rd"),
+  M("카레라이스","🍛","japanese",1,1,"집,외식",9,"s"), M("메밀소바","🍜","japanese",0,0,"외식",10,"h"),
+  M("샤브샤브","🍲","japanese",0,1,"외식",19,"gcd"), M("장어덮밥","🍱","japanese",0,1,"외식",30,"hd"),
+  // 양식
+  M("파스타","🍝","western",0,1,"외식,집",17,"d"), M("피자","🍕","western",0,1,"배달,외식",12,"g"),
+  M("스테이크","🥩","western",0,1,"외식,집",42,"d"), M("리조또","🍚","western",0,1,"외식",18,"d"),
+  M("샐러드","🥗","western",0,0,"집,배달,외식",11,"sh"), M("샌드위치","🥪","western",0,0,"집,배달",8.5,"s"),
+  M("오믈렛","🍳","western",0,0,"집",3.5,"s"), M("함박스테이크","🍖","western",0,1,"외식,집",13.5,"s"),
+  M("감바스","🦐","western",1,0,"집,외식",18,"d"), M("오므라이스","🍳","western",0,1,"외식,집",10.5,"s"),
+  // 분식
+  M("떡볶이","🌶️","snack",2,0,"배달,외식,집",6,"sg"), M("김밥","🍙","snack",0,0,"외식,집,배달",3.5,"s"),
+  M("라면","🍜","snack",1,0,"집",1.5,"src"), M("순대","🌭","snack",0,0,"외식,배달",5,"s"),
+  M("쫄면","🌶️","snack",2,0,"외식",7,"h"), M("만두","🥟","snack",0,0,"집,외식",6.5,"s"),
+  M("모둠튀김","🍤","snack",0,0,"외식,배달",5.5,"r"), M("라볶이","🍜","snack",2,0,"외식,배달",7.5,"s"),
+  // 아시안
+  M("쌀국수","🍜","asian",0,0,"외식,배달",11,"sdc"), M("팟타이","🍝","asian",0,1,"외식",14,"d"),
+  M("인도 커리","🍛","asian",1,1,"외식",17,"d"), M("분짜","🥢","asian",0,0,"외식",13,"hd"),
+  M("타코","🌮","asian",1,0,"외식",15,"d"), M("나시고렝","🍳","asian",1,1,"외식",12,"s"),
+  M("똠얌꿍","🍲","asian",2,0,"외식",16,"cd"), M("반미","🥖","asian",0,0,"외식,배달",7.5,"s"),
+  // 치킨
+  M("후라이드치킨","🍗","chicken",0,1,"배달,외식",11,"g"), M("양념치킨","🍗","chicken",1,1,"배달,외식",12,"g"),
+  M("간장치킨","🍗","chicken",0,1,"배달",12,"g"), M("반반치킨","🍗","chicken",1,1,"배달,외식",12,"g"),
+  M("파닭","🍗","chicken",0,1,"배달",12.5,"g"), M("마늘치킨","🧄","chicken",0,1,"배달",13,"g"),
+  M("순살치킨","🍗","chicken",0,1,"배달",12,"sg"), M("닭강정","🍗","chicken",1,1,"배달",10,"g"),
+  M("찜닭","🍗","chicken",1,1,"배달,외식",13,"g"),
+  // 야식
+  M("닭발","🔥","late",2,0,"배달",10,"g"), M("오돌뼈볶음","🔥","late",2,0,"배달,외식",9,"g"),
+  M("막창구이","🔥","late",0,1,"외식,배달",20,"g"), M("골뱅이소면","🍜","late",2,0,"외식,배달",11,"gd"),
+  M("순대볶음","🌶️","late",2,0,"배달,외식",8,"g"), M("닭똥집튀김","🍗","late",0,0,"배달,외식",9,"g"),
+  M("육회","🥩","late",0,0,"외식,배달",18,"d"), M("곱창전골","🍲","late",1,1,"외식,배달",16,"gc"),
+  M("편의점 라면·김밥","🏪","late",1,0,"집",3,"s"),
+  // 패스트푸드
+  M("불고기버거 세트","🍔","fastfood",0,1,"배달,외식",7,"s"), M("치즈버거 세트","🍔","fastfood",0,1,"배달,외식",7.5,"s"),
+  M("치킨버거 세트","🍔","fastfood",0,1,"배달,외식",7.5,"s"), M("새우버거 세트","🍤","fastfood",0,1,"배달,외식",7,"s"),
+  M("수제버거","🍔","fastfood",0,1,"외식",14,"d"), M("핫도그","🌭","fastfood",0,0,"외식,배달",4.5,"s"),
+  M("치킨너겟","🍗","fastfood",0,0,"배달,외식",5,"s"), M("브리또","🌯","fastfood",1,1,"외식,배달",9,"s"),
+  M("감자튀김","🍟","fastfood",0,0,"배달,외식",3,"s"),
+  // 디저트
+  M("빙수","🍧","dessert",0,0,"외식,배달",12,"hd"), M("와플","🧇","dessert",0,0,"외식,배달",6.5,"d"),
+  M("크로플","🧇","dessert",0,0,"외식,배달",5.5,"s"), M("마카롱","🍬","dessert",0,0,"외식,배달",3,"d"),
+  M("조각케이크","🍰","dessert",0,0,"외식,배달",7,"d"), M("붕어빵","🐟","dessert",0,0,"외식",2,"cs"),
+  M("호떡","🥞","dessert",0,0,"외식",2,"c"), M("아이스크림","🍦","dessert",0,0,"외식,배달",4.5,"h"),
+  M("탕후루","🍓","dessert",0,0,"외식",4,"s"), M("츄러스","🥖","dessert",0,0,"외식",4,"s"),
+  M("젤라토","🍨","dessert",0,0,"외식",6,"hd"), M("티라미수","🍰","dessert",0,0,"외식,배달",8,"d"),
+  // 카페·브런치
+  M("브런치 플레이트","🍳","cafe",0,1,"외식",19,"d"), M("팬케이크","🥞","cafe",0,0,"외식,배달",14,"d"),
+  M("베이글·크림치즈","🥯","cafe",0,0,"외식,배달",6,"s"), M("크루아상","🥐","cafe",0,0,"외식,배달",5,"s"),
+  M("토스트","🍞","cafe",0,0,"외식,집,배달",5,"s"), M("수프와 빵","🥣","cafe",0,0,"외식",9,"cr"),
+  M("프렌치토스트","🍞","cafe",0,0,"외식,집",12,"d"), M("에그베네딕트","🍳","cafe",0,1,"외식",16,"d"),
+  M("파니니","🥪","cafe",0,0,"외식,배달",9.5,"s"), M("라떼와 디저트","☕","cafe",0,0,"외식,배달",9,"d"),
+];
+
+// ---------- 저장 ----------
+// 기기 안(localStorage)에 항상 저장하고, claude.ai에 로그인한 상태면 내 계정 공간에도 저장해 기기 간에 이어 씀
+const local = {
+  get(k, d) { try { const v = localStorage.getItem("dinner:" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("dinner:" + k, JSON.stringify(v)); } catch {} },
+};
+// 꺼 둔 종류를 저장 (새 종류가 생기면 자동으로 켜짐). 예전 버전의 'cats'(켜 둔 종류)도 옮겨 옴
+function initCatsOff(saved, oldCats) {
+  if (Array.isArray(saved)) return new Set(saved);
+  if (Array.isArray(oldCats)) {
+    const off = CATS.map(c => c.id).filter(id => !NEW_CATS.includes(id) && !oldCats.includes(id));
+    if (!oldCats.includes("chicken")) off.push("late");
+    return new Set([...off, ...SWEET_CATS]);
+  }
+  return new Set(SWEET_CATS);
+}
+const state = {
+  catsOff: initCatsOff(local.get("catsOff", null), local.get("cats", null)),
+  budgets: new Set(local.get("budgets", [])),
+  spicy: "any", weight: "any", way: "any", weather: "auto", company: "any",
+  history: local.get("history", []), favs: local.get("favs", []),
+  custom: local.get("custom", []), hidden: local.get("hidden", []),
+  current: null, rolling: false,
+  poll: null, votes: {},
+};
+const cloud = { db: null, user: null, uid: null, prefsRef: null, canWrite: null, saving: false, dirty: false, timer: null, ready: false };
+
+function prefsObj() {
+  return { catsOff: [...state.catsOff], budgets: [...state.budgets], history: state.history, favs: state.favs, custom: state.custom, hidden: state.hidden };
+}
+function persist() {
+  const p = prefsObj();
+  for (const k in p) local.set(k, p[k]);
+  if (cloud.prefsRef) { clearTimeout(cloud.timer); cloud.timer = setTimeout(flushCloud, 800); }
+}
+async function flushCloud() {
+  if (!cloud.prefsRef) return;
+  if (cloud.saving) { cloud.dirty = true; return; }
+  cloud.saving = true;
+  try { await cloud.prefsRef.set(prefsObj()); }
+  catch (e) { if (e && e.code === "invalid_argument") cloud.prefsRef = null; }
+  cloud.saving = false;
+  if (cloud.dirty) { cloud.dirty = false; flushCloud(); }
+}
+
+const $ = id => document.getElementById(id);
+const allMenus = () => [...BASE_MENUS, ...state.custom];
+const byName = n => allMenus().find(m => m.n === n);
+const catLabel = id => (CATS.find(c => c.id === id) || {}).label || "";
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+
+// ---------- 날씨·계절 ----------
+function seasonKey() {
+  const m = new Date().getMonth() + 1;
+  return (m >= 11 || m <= 3) ? "c" : (m >= 6 && m <= 9) ? "h" : null;
+}
+function weatherKey() {
+  if (state.weather === "auto") return seasonKey();
+  return state.weather === "none" ? null : state.weather;
+}
+
+// ---------- 필터와 가중치 ----------
+function inBudget(m) {
+  if (!state.budgets.size || m.p == null) return true;
+  return BUDGETS.some(b => state.budgets.has(b.id) && m.p > b.min && m.p <= b.max);
+}
+function candidates(excludeName) {
+  const cut = Date.now() - 3 * 864e5;
+  const recent = new Set(state.history.filter(h => h.t > cut).map(h => h.n));
+  const favOnly = $("favOnly").checked, exRecent = $("excludeRecent").checked;
+  return allMenus().filter(m =>
+    !state.catsOff.has(m.c) && !state.hidden.includes(m.n) &&
+    (state.spicy === "any" || (state.spicy === "mild" ? m.s === 0 : m.s >= 1)) &&
+    (state.weight === "any" || (state.weight === "heavy" ? m.h : !m.h)) &&
+    (state.way === "any" || m.w.includes(state.way)) &&
+    inBudget(m) &&
+    !(exRecent && recent.has(m.n)) &&
+    (!favOnly || state.favs.includes(m.n)) &&
+    m.n !== excludeName
+  );
+}
+// 날씨·동행에 맞는 메뉴는 4배 더 잘 나옴 (완전히 빼지는 않음)
+function matchKeys(m) {
+  const keys = [], wk = weatherKey();
+  if (wk && m.t.includes(wk)) keys.push(wk);
+  if (state.company !== "any" && m.t.includes(state.company)) keys.push(state.company);
+  return keys;
+}
+function weightedPick(pool) {
+  const ws = pool.map(m => 1 + 3 * matchKeys(m).length);
+  let r = Math.random() * ws.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < pool.length; i++) { r -= ws[i]; if (r <= 0) return pool[i]; }
+  return pool[pool.length - 1];
+}
+
+function updateCount() {
+  const n = candidates().length;
+  $("count").textContent = n ? `조건에 맞는 메뉴 ${n}개` : "조건에 맞는 메뉴가 없어요. 조건을 하나 풀어 보세요.";
+  $("pickBtn").disabled = !n || state.rolling;
+  const parts = [];
+  const wk = weatherKey();
+  if (wk) parts.push(TAG[wk]);
+  const label = (key) => document.querySelector(`.chips[data-key="${key}"] .chip.on`).textContent;
+  for (const k of ["company", "spicy", "weight", "way"]) if (state[k] !== "any") parts.push(label(k));
+  if (state.budgets.size) parts.push(BUDGETS.filter(b => state.budgets.has(b.id)).map(b => b.label).join("/"));
+  if (state.catsOff.size) parts.push(`종류 ${CATS.length - state.catsOff.size}개`);
+  $("summaryLine").textContent = (parts.length ? parts.join(" · ") : "조건 없음") + ` · 후보 ${n}개`;
+  $("seasonNote").textContent = state.weather === "auto"
+    ? (seasonKey() ? `(자동: 지금은 ${TAG[seasonKey()]} 메뉴 우대)` : "(자동: 지금은 계절 우대 없음)") : "";
+}
+
+// ---------- 추천 ----------
+function show(m) { $("rEmoji").textContent = m.e; $("rName").textContent = m.n; }
+function pick() {
+  if (state.rolling) return;
+  let pool = candidates(state.current && state.current.n);
+  if (!pool.length) pool = candidates();
+  if (!pool.length) return;
+  const final = weightedPick(pool);
+  state.rolling = true;
+  $("pickBtn").disabled = true;
+  $("resultCard").classList.add("rolling");
+  $("rTags").innerHTML = ""; $("rReason").textContent = "";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let i = 0, delay = 50;
+  const spin = () => {
+    show(pool[Math.floor(Math.random() * pool.length)]);
+    i++; delay *= 1.12;
+    if (i < 16 && !reduce) setTimeout(spin, delay); else land(final);
+  };
+  spin();
+}
+function land(m) {
+  state.rolling = false;
+  state.current = m;
+  $("resultCard").classList.remove("rolling");
+  show(m);
+  for (const id of ["rEmoji", "rName"]) { const el = $(id); el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop"); }
+  const keys = matchKeys(m);
+  $("rReason").textContent = keys.length ? REASON[keys[0]](m.n) + "!" : "";
+  const tags = [
+    catLabel(m.c), ["순한 맛", "약간 매콤", "매운 맛"][m.s], m.h ? "든든" : "가벼움",
+    m.p != null ? `1인 약 ${Math.round(m.p * 1000).toLocaleString("ko-KR")}원` : null, ...m.w,
+  ].filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`);
+  const extra = [...(m.t || "")].map(k => `<span class="tag${keys.includes(k) ? " hot" : ""}">${esc(TAG[k])}</span>`);
+  $("rTags").innerHTML = [...extra, ...tags].join("");
+  $("afterPick").hidden = false;
+  $("pickBtn").textContent = "🔄 다른 메뉴 추천";
+  $("mapLink").href = "https://map.naver.com/p/search/" + encodeURIComponent(m.n);
+  $("recipeLink").href = "https://www.youtube.com/results?search_query=" + encodeURIComponent(m.n + " 레시피");
+  renderFavBtn(); updateCount();
+}
+
+function decide(m) {
+  state.history.unshift({ n: m.n, e: m.e, t: Date.now() });
+  state.history = state.history.slice(0, 30);
+  persist(); renderHistory(); updateCount();
+  toast(`오늘 저녁은 ${m.n}! 맛있게 드세요 😋`);
+}
+function toggleFav(name) {
+  const i = state.favs.indexOf(name);
+  if (i >= 0) state.favs.splice(i, 1); else state.favs.push(name);
+  persist(); renderFavBtn(); renderFavs(); updateCount();
+}
+function renderFavBtn() {
+  if (state.current) $("favBtn").textContent = state.favs.includes(state.current.n) ? "♥ 즐겨찾기됨" : "♡ 즐겨찾기";
+}
+function hideMenu(name) {
+  if (!state.hidden.includes(name)) state.hidden.push(name);
+  persist(); renderHidden(); updateCount();
+  toast(`'${name}'은(는) 이제 추천하지 않아요. 메뉴 관리에서 되돌릴 수 있어요.`);
+}
+
+// ---------- 목록 ----------
+function ago(t) {
+  const d = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(t).setHours(0, 0, 0, 0)) / 864e5);
+  return d === 0 ? "오늘" : d === 1 ? "어제" : `${d}일 전`;
+}
+const emptyLi = msg => `<li class="empty">${msg}</li>`;
+function renderHistory() {
+  $("historyList").innerHTML = state.history.length
+    ? state.history.slice(0, 10).map(h => `<li>${h.e} ${esc(h.n)}<span class="when">${ago(h.t)}</span></li>`).join("")
+    : emptyLi("아직 기록이 없어요. ‘이걸로 결정’을 누르면 여기에 남아요.");
+}
+function renderFavs() {
+  const favs = state.favs.filter(byName);
+  $("favList").innerHTML = favs.length
+    ? favs.map(n => `<li>${byName(n).e} ${esc(n)}<button class="x" data-unfav="${esc(n)}">✕ 빼기</button></li>`).join("")
+    : emptyLi("추천 결과에서 ♡를 눌러 담아 보세요.");
+}
+function renderCustom() {
+  $("customList").innerHTML = state.custom.length
+    ? state.custom.map((m, i) => `<li>${m.e} ${esc(m.n)} <span class="tag">${esc(catLabel(m.c))}</span><button class="x" data-del="${i}">✕ 삭제</button></li>`).join("")
+    : emptyLi("추가한 메뉴도 추천 후보에 함께 들어가요.");
+}
+function renderHidden() {
+  $("hiddenList").innerHTML = state.hidden.length
+    ? state.hidden.map(n => `<li>${(byName(n) || { e: "🍽️" }).e} ${esc(n)}<button class="x" data-unhide="${esc(n)}">↩ 되돌리기</button></li>`).join("")
+    : emptyLi("싫어하거나 못 먹는 메뉴는 결과 화면에서 ‘이 메뉴 빼기’를 누르세요.");
+}
+function renderAll() { renderHistory(); renderFavs(); renderCustom(); renderHidden(); renderCatChips(); updateCount(); }
+
+// ---------- 같이 투표 (공유 저장소) ----------
+const pollActive = () => {
+  const p = state.poll;
+  return p && p.day === today() && Array.isArray(p.options) && p.options.length ? p : null;
+};
+let pollRenderToken = 0;
+async function renderPoll() {
+  const body = $("pollBody");
+  $("pollAddBtn").hidden = !cloud.db;
+  // claude.ai 밖(일반 웹사이트)에서는 투표 기능 자체를 숨김
+  if (!window.claude) { $("pollCard").hidden = true; return; }
+  if (!cloud.db) {
+    body.innerHTML = `<div class="note">같이 투표는 claude.ai에 로그인한 상태에서 이 페이지 링크로 열었을 때 쓸 수 있어요. 메뉴 추천은 지금도 그대로 쓸 수 있어요.</div>`;
+    return;
+  }
+  if (!cloud.ready) return;
+  const p = pollActive();
+  if (!p) {
+    body.innerHTML = `<div class="note">아직 오늘의 후보가 없어요. 메뉴를 추천받은 뒤 ‘📮 투표에 올리기’를 누르면 첫 후보가 생겨요.</div>`;
+    return;
+  }
+  const votes = Object.entries(state.votes).filter(([, v]) => v.round === p.round);
+  const counts = {};
+  for (const [id, v] of votes) (counts[v.menu] = counts[v.menu] || []).push(id);
+  const max = Math.max(0, ...Object.values(counts).map(a => a.length));
+  const total = votes.length;
+  const ids = votes.map(([id]) => id);
+  const token = ++pollRenderToken;
+  const ps = cloud.user && ids.length ? await cloud.user.profiles(ids) : {};
+  if (token !== pollRenderToken) return;
+  const mine = cloud.uid && state.votes[cloud.uid] && state.votes[cloud.uid].round === p.round ? state.votes[cloud.uid].menu : null;
+
+  const ul = document.createElement("ul");
+  ul.className = "poll-list";
+  for (const o of p.options) {
+    const voters = counts[o.n] || [];
+    const li = document.createElement("li");
+    li.className = "poll-item" + (voters.length && voters.length === max ? " lead" : "");
+    const bar = document.createElement("div");
+    bar.className = "poll-bar";
+    bar.style.width = total ? `${(voters.length / total) * 100}%` : "0%";
+    const name = document.createElement("div");
+    name.className = "poll-name";
+    name.textContent = `${o.e} ${o.n}`;
+    const meta = document.createElement("div");
+    meta.className = "poll-meta";
+    const av = document.createElement("span");
+    av.className = "avatars";
+    for (const id of voters.slice(0, 6)) {
+      const img = document.createElement("img");
+      img.src = ps[id] ? ps[id].avatarUrl : "";
+      img.alt = ""; img.title = (ps[id] && ps[id].name) || "누군가";
+      av.appendChild(img);
+    }
+    const cnt = document.createElement("span");
+    cnt.textContent = `${voters.length}표`;
+    meta.append(av, cnt);
+    const btn = document.createElement("button");
+    btn.className = "btn vote-btn" + (mine === o.n ? " mine" : "");
+    btn.textContent = mine === o.n ? "✓ 내 선택" : "투표";
+    btn.dataset.vote = o.n;
+    btn.disabled = cloud.canWrite === false;
+    li.append(bar, name, meta, btn);
+    ul.appendChild(li);
+  }
+  body.innerHTML = "";
+  body.appendChild(ul);
+  const foot = document.createElement("div");
+  foot.className = "poll-foot";
+  if (cloud.canWrite === false) {
+    foot.innerHTML = `<div class="note">보기 전용 링크라 투표할 수 없어요. 공유한 사람에게 ‘참여’ 권한을 요청하세요.</div>`;
+  } else {
+    foot.innerHTML = `<button class="btn" id="pollDecide" ${max ? "" : "disabled"}>🏆 1위로 결정</button><button class="btn" id="pollReset">🧹 새 투표 시작</button>`;
+  }
+  body.appendChild(foot);
+}
+function dbErrorToast(e) {
+  const code = e && e.code;
+  toast(code === "invalid_argument" ? "이 링크에서는 투표 권한이 없어요" :
+        code === "quota_exceeded" ? "저장 공간이 가득 찼어요" : "잠시 후 다시 시도해 주세요");
+}
+const newRound = () => Math.random().toString(36).slice(2, 10);
+async function addToPoll(m) {
+  if (!cloud.db) return;
+  const p = pollActive() || { round: newRound(), options: [] };
+  if (p.options.some(o => o.n === m.n)) return toast("이미 후보에 있어요");
+  if (p.options.length >= 8) return toast("후보는 8개까지 올릴 수 있어요");
+  try {
+    await cloud.db.doc("poll/today").set({ day: today(), round: p.round, options: [...p.options, { n: m.n, e: m.e }] });
+    toast(`'${m.n}'을(를) 후보에 올렸어요. 링크를 공유해 같이 골라 보세요`);
+  } catch (e) { dbErrorToast(e); }
+}
+async function vote(name) {
+  const p = pollActive();
+  if (!p || !cloud.uid) return toast("로그인한 상태에서만 투표할 수 있어요");
+  try { await cloud.db.doc("votes/" + cloud.uid).set({ round: p.round, menu: name, t: Date.now() }); }
+  catch (e) { dbErrorToast(e); }
+}
+let resetArmed = false, resetTimer;
+async function resetPoll(btn) {
+  if (!resetArmed) {
+    resetArmed = true; btn.textContent = "정말 지울까요? 한 번 더 누르세요";
+    resetTimer = setTimeout(() => { resetArmed = false; renderPoll(); }, 3000);
+    return;
+  }
+  clearTimeout(resetTimer); resetArmed = false;
+  try { await cloud.db.doc("poll/today").set({ day: today(), round: newRound(), options: [] }); toast("새 투표를 시작했어요"); }
+  catch (e) { dbErrorToast(e); }
+}
+function decideFromPoll() {
+  const p = pollActive(); if (!p) return;
+  const counts = {};
+  for (const v of Object.values(state.votes)) if (v.round === p.round) counts[v.menu] = (counts[v.menu] || 0) + 1;
+  const top = p.options.slice().sort((a, b) => (counts[b.n] || 0) - (counts[a.n] || 0))[0];
+  if (!top) return;
+  const m = byName(top.n) || { n: top.n, e: top.e, c: "korean", s: 0, h: 1, w: [], p: null, t: "" };
+  land(m); decide(m);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function initCloud() {
+  if (!window.claude || typeof window.claude.use !== "function") { renderPoll(); return; }
+  let db = null, user = null;
+  try { [db, user] = await Promise.all([window.claude.use("db"), window.claude.use("user")]); } catch {}
+  cloud.db = db; cloud.user = user;
+  if (!db) { renderPoll(); return; }
+  cloud.uid = user ? await user.id() : null;
+  cloud.canWrite = user ? await user.can("data.write") : null;
+  renderPoll();
+
+  // 내 기록·즐겨찾기를 계정에 보관
+  if (cloud.uid) {
+    try {
+      const ref = db.doc("data/users/" + cloud.uid + "/prefs");
+      const snap = await ref.get();
+      cloud.prefsRef = ref;
+      if (snap.exists) {
+        const d = snap.data();
+        if (Array.isArray(d.catsOff) || Array.isArray(d.cats)) state.catsOff = initCatsOff(d.catsOff, d.cats);
+        if (Array.isArray(d.budgets)) state.budgets = new Set(d.budgets);
+        if (Array.isArray(d.history)) state.history = d.history.slice();
+        if (Array.isArray(d.favs)) state.favs = d.favs.slice();
+        if (Array.isArray(d.custom)) state.custom = d.custom.map(m => ({ ...m, w: m.w.slice() }));
+        if (Array.isArray(d.hidden)) state.hidden = d.hidden.slice();
+        const p = prefsObj(); for (const k in p) local.set(k, p[k]);
+        renderAll();
+      } else if (state.history.length || state.favs.length || state.custom.length || state.hidden.length) {
+        flushCloud();
+      }
+    } catch {}
+  }
+
+  // 투표 실시간 구독 (한 번만)
+  let gotPoll = false, gotVotes = false;
+  const loadTimer = setTimeout(() => {
+    if (!cloud.ready) $("pollBody").innerHTML = `<div class="note">투표 정보를 아직 불러오지 못했어요. 연결이 되면 자동으로 나타나요.</div>`;
+  }, 10000);
+  const maybeReady = () => { if (gotPoll && gotVotes) { cloud.ready = true; clearTimeout(loadTimer); } renderPoll(); };
+  const onErr = () => { clearTimeout(loadTimer); $("pollBody").innerHTML = `<div class="note">투표를 불러올 수 없어요. 페이지를 다시 열어 주세요.</div>`; };
+  db.doc("poll/today").onSnapshot(s => { state.poll = s.exists ? s.data() : null; gotPoll = true; maybeReady(); }, onErr);
+  db.collection("votes").onSnapshot(qs => {
+    const v = {}; for (const d of qs.docs) v[d.id] = d.data();
+    state.votes = v; gotVotes = true; maybeReady();
+  }, onErr);
+}
+
+// ---------- 이벤트 ----------
+function renderCatChips() {
+  $("catChips").innerHTML = CATS.map(c => `<button class="chip ${state.catsOff.has(c.id) ? "" : "on"}" data-cat="${c.id}">${c.label}</button>`).join("");
+  renderBudgetChips();
+}
+function renderBudgetChips() {
+  $("budgetChips").innerHTML =
+    `<button class="chip ${state.budgets.size ? "" : "on"}" data-b="any">상관없음</button>` +
+    BUDGETS.map(b => `<button class="chip ${state.budgets.has(b.id) ? "on" : ""}" data-b="${b.id}">${b.label}</button>`).join("");
+}
+$("catChips").addEventListener("click", e => {
+  const b = e.target.closest("[data-cat]"); if (!b) return;
+  const id = b.dataset.cat;
+  if (!state.catsOff.has(id)) {
+    if (state.catsOff.size >= CATS.length - 1) return toast("최소 한 종류는 골라 주세요");
+    state.catsOff.add(id);
+  } else state.catsOff.delete(id);
+  b.classList.toggle("on");
+  persist(); updateCount();
+});
+document.querySelector(".presets").addEventListener("click", e => {
+  const b = e.target.closest("[data-preset]"); if (!b) return;
+  const p = b.dataset.preset;
+  state.catsOff = new Set(p === "all" ? [] : p === "meal" ? SWEET_CATS : CATS.map(c => c.id).filter(id => !SWEET_CATS.includes(id)));
+  persist(); renderCatChips(); updateCount();
+});
+$("budgetChips").addEventListener("click", e => {
+  const b = e.target.closest("[data-b]"); if (!b) return;
+  const id = b.dataset.b;
+  if (id === "any") state.budgets.clear();
+  else if (state.budgets.has(id)) state.budgets.delete(id);
+  else state.budgets.add(id);
+  persist(); renderBudgetChips(); updateCount();
+});
+document.querySelectorAll(".chips[data-key]").forEach(g => g.addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  g.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c === b));
+  state[g.dataset.key] = b.dataset.v;
+  updateCount();
+}));
+$("addCat").innerHTML = CATS.map(c => `<option value="${c.id}">${c.label}</option>`).join("");
+
+$("pickBtn").addEventListener("click", pick);
+$("acceptBtn").addEventListener("click", () => state.current && decide(state.current));
+$("favBtn").addEventListener("click", () => state.current && toggleFav(state.current.n));
+$("hideBtn").addEventListener("click", () => state.current && hideMenu(state.current.n));
+$("pollAddBtn").addEventListener("click", () => state.current && addToPoll(state.current));
+$("excludeRecent").addEventListener("change", updateCount);
+$("favOnly").addEventListener("change", updateCount);
+$("pollBody").addEventListener("click", e => {
+  const v = e.target.closest("[data-vote]"); if (v) return vote(v.dataset.vote);
+  const t = e.target.closest("button"); if (!t) return;
+  if (t.id === "pollReset") resetPoll(t);
+  if (t.id === "pollDecide") decideFromPoll();
+});
+$("favList").addEventListener("click", e => { const b = e.target.closest("[data-unfav]"); if (b) toggleFav(b.dataset.unfav); });
+$("customList").addEventListener("click", e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  state.custom.splice(+b.dataset.del, 1);
+  persist(); renderCustom(); renderFavs(); updateCount();
+});
+$("hiddenList").addEventListener("click", e => {
+  const b = e.target.closest("[data-unhide]"); if (!b) return;
+  state.hidden = state.hidden.filter(n => n !== b.dataset.unhide);
+  persist(); renderHidden(); updateCount();
+});
+$("addForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const n = $("addName").value.trim(); if (!n) return;
+  if (allMenus().some(m => m.n === n)) return toast("이미 있는 메뉴예요");
+  const price = parseInt($("addPrice").value, 10);
+  state.custom.push({ n, e: "⭐", c: $("addCat").value, s: +$("addSpicy").value, h: 1, w: ["집", "배달", "외식"], p: price > 0 ? price / 1000 : null, t: "" });
+  $("addName").value = ""; $("addPrice").value = "";
+  persist(); renderCustom(); updateCount(); toast(`'${n}' 추가 완료!`);
+});
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+  ["history", "fav", "manage"].forEach(p => { $("pane-" + p).hidden = p !== t.dataset.tab; });
+}));
+// 휴대폰에서는 조건 카드를 접어서 시작
+if (matchMedia("(max-width: 480px)").matches) $("filtersBox").open = false;
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+renderAll();
+initCloud();
+</script>
+
+</body>
+</html>
